@@ -39,6 +39,7 @@ export default function MedicalSidebar({ onLogout }) {
     { to: '/accueil', label: 'Accueil', icon: <Home size={22} /> },
     { to: '/patients', label: 'Patients', icon: <Users size={22} /> },
     { to: '/praticiens', label: 'Praticiens', icon: <UserPlus size={22} /> },
+
   ];
 
   const isActive = (path) => location.pathname === path;

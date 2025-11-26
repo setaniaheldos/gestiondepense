@@ -1,5 +1,5 @@
 const express = require('express');
-const { Pool } = require('pg'); // Remplacez sqlite3 par pg
+const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const cors = require('cors');
 
@@ -11,7 +11,7 @@ app.use(express.json());
 
 // Connexion à PostgreSQL via Render (utilisez DATABASE_URL en env var)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://test_eyqi_user:cpqaATATbc7V5fDfSJrZ1tnXYWRgdwai@dpg-d4j88rv5r7bs73f836r0-a.oregon-postgres.render.com/test_eyqi',
+  connectionString: process.env.DATABASE_URL || 'postgresql://test_i472_user:QGmSbQ68uNbXw4OPGIo7wmmcNFyWCAAf@dpg-d4j9pj75r7bs73f9b9u0-a.oregon-postgres.render.com/test_i472',
   ssl: { rejectUnauthorized: false } // Nécessaire pour Render
 });
 
@@ -26,14 +26,52 @@ pool.connect((err) => {
 // 🔧 Création des tables (exécutée au démarrage)
 async function createTables() {
   try {
-    // Table transactions
+    // ⚠️ Suppression temporaire pour la phase de développement
+    await pool.query(`DROP TABLE IF EXISTS transaction CASCADE;`);
+    await pool.query(`DROP TYPE IF EXISTS transaction_categorie;`);
+    // ⚠️ Fin Suppression temporaire
+    
+    // Création du type ENUM pour la catégorie de transaction (si inexistant)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'transaction_categorie') THEN
+          CREATE TYPE transaction_categorie AS ENUM ('depense', 'revenu');
+        END IF;
+      END $$;
+    `);
+
+    // Table transactions (avec ENUM pour categorie ET AJOUT DE DESCRIPTION)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS transaction (
         id SERIAL PRIMARY KEY,
-        categorie TEXT NOT NULL,
-        montant NUMERIC NOT NULL,        
+        categorie transaction_categorie NOT NULL,
+        montant NUMERIC NOT NULL,
+        description TEXT, -- Nouvelle colonne ajoutée
         date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+
+    // Vérification et mise à jour des colonnes si la table existe déjà (pour compatibilité)
+    await pool.query(`
+      DO $$ 
+      BEGIN
+        -- Mettre à jour la colonne categorie si nécessaire
+        IF NOT (EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'transaction' AND column_name = 'categorie' AND udt_name = 'transaction_categorie'
+        )) THEN
+          ALTER TABLE transaction ALTER COLUMN categorie TYPE transaction_categorie USING categorie::transaction_categorie;
+        END IF;
+
+        -- Ajouter la colonne description si elle n'existe pas
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name = 'transaction' AND column_name = 'description'
+        ) THEN
+          ALTER TABLE transaction ADD COLUMN description TEXT;
+        END IF;
+      END $$;
     `);
 
     // Table activites
@@ -66,7 +104,7 @@ async function createTables() {
       );
     `);
 
-    console.log('✅ Toutes les tables ont été créées (si elles n’existaient pas)');
+    console.log('✅ Toutes les tables ont été créées (si elles n’existaient pas) et la colonne description est présente.');
   } catch (err) {
     console.error('Erreur lors de la création des tables :', err.message);
   }
@@ -80,12 +118,18 @@ async function query(sql, params = []) {
   return result;
 }
 
+// Fonction helper pour valider la catégorie
+function validateCategorie(categorie) {
+  return ['depense', 'revenu'].includes(categorie.toLowerCase());
+}
+
 // ===== CRUD pour les Transactions =====
 
 // GET : Lister toutes les transactions
 app.get('/transactions', async (req, res) => {
   try {
-    const result = await query('SELECT * FROM transaction ORDER BY date DESC');
+    // Sélectionner la nouvelle colonne description
+    const result = await query('SELECT id, categorie, montant, description, date FROM transaction ORDER BY date DESC');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -96,7 +140,7 @@ app.get('/transactions', async (req, res) => {
 app.get('/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await query('SELECT * FROM transaction WHERE id = $1', [id]);
+    const result = await query('SELECT id, categorie, montant, description, date FROM transaction WHERE id = $1', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Transaction non trouvée' });
     res.json(result.rows[0]);
   } catch (err) {
@@ -107,15 +151,27 @@ app.get('/transactions/:id', async (req, res) => {
 // POST : Créer une nouvelle transaction
 app.post('/transactions', async (req, res) => {
   try {
-    const { categorie, montant } = req.body;
-    if (!categorie || montant === undefined) return res.status(400).json({ error: 'Catégorie et montant requis' });
+    // Récupérer la description
+    const { categorie, montant, description } = req.body; 
+    
+    if (!categorie || montant === undefined) return res.status(400).json({ error: 'Type de catégorie et montant requis' });
+    
+    // Validation stricte de la catégorie
+    if (!validateCategorie(categorie)) {
+      return res.status(400).json({ error: 'Catégorie doit être "depense" ou "revenu"' });
+    }
 
+    // Inclure la description dans la requête
     const result = await query(
-      'INSERT INTO transaction (categorie, montant) VALUES ($1, $2) RETURNING *',
-      [categorie, montant]
+      'INSERT INTO transaction (categorie, montant, description) VALUES ($1, $2, $3) RETURNING *',
+      [categorie.toLowerCase(), montant, description]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
+    // Gérer l'erreur ENUM si violation
+    if (err.code === '42804') { // Invalid input syntax for type
+      return res.status(400).json({ error: 'Catégorie invalide. Doit être "depense" ou "revenu"' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -124,16 +180,28 @@ app.post('/transactions', async (req, res) => {
 app.put('/transactions/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { categorie, montant } = req.body;
-    if (!categorie || montant === undefined) return res.status(400).json({ error: 'Catégorie et montant requis pour la mise à jour' });
+    // Récupérer la description
+    const { categorie, montant, description } = req.body; 
+    
+    if (!categorie || montant === undefined) return res.status(400).json({ error: 'Type de catégorie et montant requis pour la mise à jour' });
+    
+    // Validation stricte de la catégorie
+    if (!validateCategorie(categorie)) {
+      return res.status(400).json({ error: 'Catégorie doit être "depense" ou "revenu"' });
+    }
 
+    // Inclure la description dans la requête
     const result = await query(
-      'UPDATE transaction SET categorie = $1, montant = $2 WHERE id = $3 RETURNING *',
-      [categorie, montant, id]
+      'UPDATE transaction SET categorie = $1, montant = $2, description = $3 WHERE id = $4 RETURNING *',
+      [categorie.toLowerCase(), montant, description, id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Transaction non trouvée' });
     res.json(result.rows[0]);
   } catch (err) {
+    // Gérer l'erreur ENUM si violation
+    if (err.code === '42804') { // Invalid input syntax for type
+      return res.status(400).json({ error: 'Catégorie invalide. Doit être "depense" ou "revenu"' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -150,7 +218,7 @@ app.delete('/transactions/:id', async (req, res) => {
   }
 });
 
-// ===== CRUD pour les Activités =====
+// ===== CRUD pour les Activités (inchangé) =====
 
 // GET : Lister toutes les activités
 app.get('/activites', async (req, res) => {
@@ -219,6 +287,8 @@ app.delete('/activites/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ===== Routes Utilisateurs et Admins (inchangées) =====
 
 // Route GET : Lister les utilisateurs en attente de validation
 app.get('/users/pending', async (req, res) => {

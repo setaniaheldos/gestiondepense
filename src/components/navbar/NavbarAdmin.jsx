@@ -12,7 +12,7 @@ export default function NavbarAdmin() {
     // { to: '/admindas', label: 'Tableau de bord', icon: <Home size={20} className="mr-2" /> },
     { to: '/admin-auth', label: 'Gest. Admins', icon: <Shield size={20} className="mr-2" /> },
     { to: '/utilisateur-login', label: 'Connexion utilisateurs ', icon: <Users size={20} className="mr-2" /> },
-    { to: '/authen', label: 'Inscription utilisateurs', icon: <UserPlus size={20} className="mr-2" /> },
+    { to: '/utilisateur', label: 'Inscription utilisateurs', icon: <UserPlus size={20} className="mr-2" /> },
   ];
 
   // Remplacement des couleurs d'accentuation (blue -> emerald)

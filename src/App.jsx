@@ -6,7 +6,7 @@ import NavbarAdmin from './components/navbar/NavbarAdmin';
 import Accueil from './components/pages/Accueil';
 import Patients from './components/pages/Patients';
 import Praticiens from './components/pages/Praticients';
-
+import RendezVous from './components/pages/RendezVous';
 import Adminaction from './components/admin/AdminAction';
 import Authen from './components/admin/AdminForm';
 import AdminList from './components/admin/AdminList';
@@ -14,7 +14,9 @@ import Utilisateur from './components/Utlisateur/ResisterUtil';
 import UtilisateurLogin from './components/Utlisateur/utilisateurLogin';
 import AdminAuth from './components/admin/AdminAuth';
 import AdminDAs from './components/admin/AdminDashboard';
-
+import Consultations from './components/pages/Consultations';
+import Prescription from './components/pages/Prescription';
+import Examen from './components/pages/Examen';
 // import Consultation from './components/pages/Consultations';
 
 export default function App() {
@@ -32,7 +34,7 @@ export default function App() {
         <Routes>
           <Route path="/accueil" element={<Accueil />} />
           <Route path="/examen" element={<Examen />} />
-     
+    
           <Route path="/patients" element={<Patients />} />
           <Route path="/praticiens" element={<Praticiens />} />
           <Route path="/admindas" element={<AdminDAs />} />
@@ -42,7 +44,7 @@ export default function App() {
           <Route path="/action" element={<Adminaction />} />
           <Route path="/utilisateur" element={<Utilisateur />} />
           <Route path="/admin-auth" element={<AdminAuth />} />
-        
+       
           <Route
             path="/utilisateur-login"
             element={<UtilisateurLogin onLogin={handleUserLogin} />}
