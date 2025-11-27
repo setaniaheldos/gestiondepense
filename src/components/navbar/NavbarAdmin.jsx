@@ -10,9 +10,9 @@ export default function NavbarAdmin() {
   // Ajout d'un lien vers le Dashboard Admin (si /admindas est la page principale)
   const navItems = [
     // { to: '/admindas', label: 'Tableau de bord', icon: <Home size={20} className="mr-2" /> },
-    { to: '/admin-auth', label: 'Gest. Admins', icon: <Shield size={20} className="mr-2" /> },
-    { to: '/utilisateur-login', label: 'Connexion utilisateurs ', icon: <Users size={20} className="mr-2" /> },
-    { to: '/utilisateur', label: 'Inscription utilisateurs', icon: <UserPlus size={20} className="mr-2" /> },
+    { to: '/admin-auth', label: 'Gest. Admins', icon: <Shield size={20} className="mr-2" /> }
+    // { to: '/utilisateur-login', label: 'Connexion utilisateurs ', icon: <Users size={20} className="mr-2" /> },
+    // { to: '/utilisateur', label: 'Inscription utilisateurs', icon: <UserPlus size={20} className="mr-2" /> },
   ];
 
   // Remplacement des couleurs d'accentuation (blue -> emerald)

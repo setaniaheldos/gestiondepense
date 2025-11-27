@@ -37,8 +37,10 @@ export default function MedicalSidebar({ onLogout }) {
 
   const menuItems = [
     { to: '/accueil', label: 'Accueil', icon: <Home size={22} /> },
-    { to: '/patients', label: 'Patients', icon: <Users size={22} /> },
-    { to: '/praticiens', label: 'Praticiens', icon: <UserPlus size={22} /> },
+    // **Icône changée pour 'Transaction'**
+    { to: '/patients', label: 'Transaction', icon: <FileText size={22} /> }, 
+    // **Icône changée pour 'Activité J'**
+    { to: '/praticiens', label: 'Activité J', icon: <ClipboardList size={22} /> }, 
 
   ];
 

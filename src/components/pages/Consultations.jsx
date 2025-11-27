@@ -1,592 +1,348 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from "react";
 import {
-  PlusIcon,
-  PencilSquareIcon,
-  TrashIcon,
-  MagnifyingGlassIcon,
-  CalendarIcon,
-  UserIcon,
-  CurrencyDollarIcon,
-  DocumentTextIcon,
-  XMarkIcon,
-  ChevronUpIcon,
-  ChevronDownIcon,
-  AcademicCapIcon, // Pour le Praticien
-  PrinterIcon, // Pour le PDF
-  UserGroupIcon // Pour le Patient
-} from "@heroicons/react/24/outline";
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import { DollarSign, MinusCircle, TrendingUp, BarChart3 } from 'lucide-react';
 
-// Constante pour la pagination
-const PAGE_SIZE = 8;
-const API_BASE_URL = 'https://mon-api-rmv3.onrender.com'; // Constante pour l'URL de base
+// URL de base de votre API Express/PostgreSQL.
+// *** IMPORTANT : Remplacez ceci par votre URL de production (ex: 'https://votre-app-render.onrender.com') ***
+const API_BASE_URL = 'http://localhost:3000';
 
-export default function Consultations() {
-  // --- États des données ---
-  const [consultations, setConsultations] = useState([]);
-  const [rendezvous, setRendezvous] = useState([]);
-  const [patients, setPatients] = useState([]);
-  const [praticiens, setPraticiens] = useState([]);
+// Helper pour formater une date selon le 'timeframe'
+const getDateFormat = (date, timeframe) => {
+  const d = new Date(date);
+  switch (timeframe) {
+    case 'weekly':
+      // Jours (ex: 20/11)
+      return `${d.getDate()}/${d.getMonth() + 1}`;
+    case 'monthly':
+      // Jours (ex: 20/11)
+      return `${d.getDate()}/${d.getMonth() + 1}`;
+    case 'yearly':
+      // Mois (ex: Nov 2023)
+      return d.toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' });
+    default:
+      return d.toLocaleDateString();
+  }
+};
 
-  // --- États du formulaire et de l'interface ---
-  const [form, setForm] = useState({
-    idRdv: '',
-    dateConsult: '',
-    compteRendu: '',
-    prix: ''
-  });
-  const [editingId, setEditingId] = useState(null);
-  const [showForm, setShowForm] = useState(false); // Par défaut masqué
-  const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
-  const [loading, setLoading] = useState(false);
-  const [pdfDate, setPdfDate] = useState(''); // Nouvel état pour la date d'impression PDF
-
-  // --- États de la recherche / filtre ---
-  const [search, setSearch] = useState({
-    patient: '',
-    praticien: '',
-    date: '',
-    compteRendu: ''
-  });
-
-  // --- États de la pagination ---
-  const [page, setPage] = useState(1);
-  const totalPages = Math.ceil(consultations.length / PAGE_SIZE);
-  const paginated = consultations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  // --- UTILS ---
-
-  // Notification
-  const showNotification = (msg, type = 'success') => {
-    setNotification({ show: true, message: msg, type });
-    setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 3500);
-  };
-
-  // Utilitaires de données (Optimisation avec useMemo)
-  const patientMap = useMemo(() => 
-    new Map(patients.map(p => [p.cinPatient, p])), 
-    [patients]
-  );
-  const praticienMap = useMemo(() => 
-    new Map(praticiens.map(p => [p.cinPraticien, p])), 
-    [praticiens]
-  );
-  const rdvMap = useMemo(() => 
-    new Map(rendezvous.map(r => [r.idRdv, r])), 
-    [rendezvous]
-  );
-
-  const getPatientName = (cin) => {
-    const p = patientMap.get(cin);
-    return p ? `${p.nom.toUpperCase()} ${p.prenom}` : 'Patient inconnu';
-  };
-
-  const getPraticienName = (cin) => {
-    const pr = praticienMap.get(cin);
-    return pr ? `Dr. ${pr.nom.toUpperCase()} ${pr.prenom}` : 'Praticien inconnu';
-  };
-
-  const getRdvDetails = (idRdv) => rdvMap.get(idRdv);
-
-  // Formatage de la date pour l'affichage
-  const formatDateTime = (dateString) => {
-    if (!dateString) return '—';
-    try {
-        return new Date(dateString).toLocaleString('fr-FR', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    } catch {
-        return dateString.substring(0, 19).replace('T', ' ');
+// Fonction pour grouper et agréger les données brutes de l'API en séries temporelles
+const groupDataByTimeframe = (transactions, activities, timeframe) => {
+  const groupedData = new Map();
+  const today = new Date();
+  
+  // Fonction pour déterminer la clé de regroupement temporelle (unique par jour/mois/année)
+  const getGroupKey = (dateStr, tf) => {
+    const d = new Date(dateStr);
+    switch (tf) {
+      case 'weekly': // Regrouper par jour
+      case 'monthly':
+        return d.toISOString().substring(0, 10); // Année-Mois-Jour
+      case 'yearly': // Regrouper par mois
+        return d.toISOString().substring(0, 7); // Année-Mois
+      default:
+        return d.toISOString().substring(0, 10);
     }
   };
 
-  // --- CHARGEMENT DES DONNÉES ---
-  const fetchAll = async () => {
-    setLoading(true);
-    try {
-      // Charger les données de toutes les tables normalisées en parallèle
-      const [consultRes, rdvRes, patRes, pratRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/consultations`),
-        axios.get(`${API_BASE_URL}/rendezvous`),
-        axios.get(`${API_BASE_URL}/patients`),
-        axios.get(`${API_BASE_URL}/praticiens`)
-      ]);
+  // 1. Traitement des Transactions (Revenue & Depense)
+  transactions.forEach(t => {
+    const montant = parseFloat(t.montant);
+    const key = getGroupKey(t.date, timeframe);
+    const displayDate = getDateFormat(t.date, timeframe);
 
-      setConsultations(consultRes.data || []);
-      setRendezvous(rdvRes.data || []);
-      setPatients(patRes.data || []);
-      setPraticiens(pratRes.data || []);
-      setPage(1);
-    } catch (err) {
-      console.error("Erreur fetchAll:", err);
-      showNotification('Impossible de charger les données. Vérifiez le serveur.', 'error');
-    } finally {
-      setLoading(false);
+    if (!groupedData.has(key)) {
+      groupedData.set(key, { 
+        dateKey: key, 
+        displayKey: displayDate,
+        Revenue: 0, 
+        Depense: 0, 
+        ActivitiesCount: 0 
+      });
     }
-  };
 
-  useEffect(() => {
-    fetchAll();
+    const dataPoint = groupedData.get(key);
+
+    if (t.categorie.toLowerCase() === 'revenu') {
+      dataPoint.Revenue += montant;
+    } else if (t.categorie.toLowerCase() === 'depense') {
+      dataPoint.Depense += montant;
+    }
+  });
+
+  // 2. Traitement des Activités (Compte)
+  // NOTE: On suppose que 'debut' dans la table activite est une date valide
+  activities.forEach(a => {
+    const key = getGroupKey(a.debut, timeframe);
+    const displayDate = getDateFormat(a.debut, timeframe);
+
+    if (!groupedData.has(key)) {
+      groupedData.set(key, { 
+        dateKey: key, 
+        displayKey: displayDate,
+        Revenue: 0, 
+        Depense: 0, 
+        ActivitiesCount: 0 
+      });
+    }
+    groupedData.get(key).ActivitiesCount += 1;
+  });
+
+  // 3. Conversion en tableau et tri
+  let finalData = Array.from(groupedData.values())
+    .map(item => ({
+        [timeframe === 'yearly' ? 'Month' : 'Day']: item.displayKey, // Utiliser la clé d'affichage
+        Revenue: Math.round(item.Revenue), // Arrondir pour l'affichage
+        Depense: Math.round(item.Depense),
+        ActivitiesCount: item.ActivitiesCount
+    }))
+    .sort((a, b) => {
+        // Tenter de trier par la clé numérique si possible (par jour/mois)
+        // Pour des raisons de simplicité, on se base sur l'ordre de la dateKey générée (Year-Month-Day)
+        return new Date(Object.keys(groupedData.keys().next().value)[0]) - new Date(Object.keys(groupedData.keys().next().value)[0]);
+    });
+  
+  // Limiter les données en fonction du timeframe (ex: 7 jours, 30 jours, 12 mois)
+  const limit = timeframe === 'weekly' ? 7 : (timeframe === 'monthly' ? 30 : 12);
+  
+  // Retourner seulement les données les plus récentes
+  return finalData.slice(-limit);
+};
+
+
+const TimeframeButton = ({ timeframe, current, onClick }) => (
+  <button
+    onClick={() => onClick(timeframe)}
+    className={`px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 ${
+      current === timeframe
+        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/50'
+        : 'bg-gray-200 text-gray-700 hover:bg-blue-100'
+    }`}
+  >
+    {timeframe.charAt(0).toUpperCase() + timeframe.slice(1)}
+  </button>
+);
+
+const StatCard = ({ title, value, icon: Icon, color, valueColor = 'text-gray-900' }) => (
+  <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100 transition-transform duration-300 hover:scale-[1.02] hover:shadow-xl">
+    <div className="flex justify-between items-start">
+      <div>
+        <p className="text-sm font-medium text-gray-500">{title}</p>
+        <p className={`text-3xl font-bold mt-1 ${valueColor}`}>{value}</p>
+      </div>
+      <div className={`p-3 rounded-full ${color}`}>
+        <Icon className="w-6 h-6 text-white" />
+      </div>
+    </div>
+  </div>
+);
+
+
+const App = () => {
+  const [timeframe, setTimeframe] = useState('weekly');
+  const [chartData, setChartData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fonction mémoïsée pour calculer les métriques financières
+  const calculateMetrics = useCallback((data) => {
+    // Si pas de données, retourner zéro
+    if (data.length === 0) {
+      return { totalRevenue: '$0.00', totalDepense: '$0.00', netBalance: '$0.00', netBalanceColor: 'text-gray-900', totalActivities: '0' };
+    }
+    
+    const totalRevenue = data.reduce((sum, item) => sum + item.Revenue, 0);
+    const totalDepense = data.reduce((sum, item) => sum + item.Depense, 0);
+    const totalActivities = data.reduce((sum, item) => sum + item.ActivitiesCount, 0);
+    const netBalance = totalRevenue - totalDepense;
+
+    // Fonction pour formater en $K ou $M
+    const formatCurrency = (amount) => {
+      const sign = amount < 0 ? '-' : '';
+      const absAmount = Math.abs(amount);
+      if (absAmount >= 1000000) return `${sign}${(absAmount / 1000000).toFixed(1)}M`;
+      if (absAmount >= 1000) return `${sign}${(absAmount / 1000).toFixed(1)}k`;
+      return `${sign}$${absAmount.toFixed(2)}`;
+    };
+    
+    // Déterminer la couleur du solde net
+    const netBalanceColor = netBalance >= 0 ? 'text-green-600' : 'text-red-600';
+
+    return {
+      totalRevenue: formatCurrency(totalRevenue),
+      totalDepense: formatCurrency(totalDepense),
+      netBalance: formatCurrency(netBalance),
+      netBalanceColor,
+      totalActivities: totalActivities.toLocaleString(),
+    };
   }, []);
 
-  // --- RECHERCHE ET FILTRE ---
-
-  const handleSearch = async () => {
-    setLoading(true);
+  // Fonction pour charger les données de l'API
+  const fetchDataFromAPI = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (search.patient) params.append('patient', search.patient);
-      if (search.praticien) params.append('praticien', search.praticien);
-      if (search.date) params.append('date', search.date);
-      if (search.compteRendu) params.append('compteRendu', search.compteRendu); 
+      // Fetch des transactions
+      const transactionsResponse = await fetch(`${API_BASE_URL}/transactions`);
+      if (!transactionsResponse.ok) throw new Error('Erreur de chargement des transactions');
+      const transactions = await transactionsResponse.json();
 
-      const url = params.toString()
-        ? `${API_BASE_URL}/consultations/search?${params.toString()}`
-        : `${API_BASE_URL}/consultations`;
+      // Fetch des activités
+      const activitiesResponse = await fetch(`${API_BASE_URL}/activites`);
+      if (!activitiesResponse.ok) throw new Error('Erreur de chargement des activités');
+      const activities = await activitiesResponse.json();
 
-      const res = await axios.get(url);
-      setConsultations(res.data || []);
-      setPage(1);
-    } catch (err) {
-      console.error(err);
-      showNotification('Erreur lors de la recherche. Vérifiez les paramètres du filtre.', 'error');
+      // Agrégation des données
+      const aggregatedData = groupDataByTimeframe(transactions, activities, timeframe);
+      
+      // Mise à jour de l'état
+      setChartData(aggregatedData);
+
+    } catch (error) {
+      console.error("Erreur lors de la récupération des données de l'API:", error);
+      // En cas d'échec, vider les données pour afficher un message d'erreur
+      setChartData([]); 
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  // --- GESTION PDF ---
-  const handlePrintPdf = () => {
-    if (!pdfDate) {
-      showNotification('Veuillez sélectionner une date pour l\'impression PDF.', 'error');
-      return;
-    }
-    
-    // Filtre les consultations pour la date sélectionnée
-    const dateToFilter = new Date(pdfDate).toISOString().split('T')[0];
-    const consultationsForPdf = consultations.filter(c => 
-        c.dateConsult.startsWith(dateToFilter)
-    );
-
-    if (consultationsForPdf.length === 0) {
-        showNotification(`Aucune consultation trouvée pour la date ${pdfDate}.`, 'error');
-        return;
-    }
-    
-    const count = consultationsForPdf.length;
-    // Simulation de l'impression
-    showNotification(`Génération d'un rapport PDF pour ${count} consultation(s) du ${pdfDate}... (Simulation)`, 'success');
-    console.log(`Données pour le PDF du ${pdfDate}:`, consultationsForPdf);
-  };
+  }, [timeframe]);
 
 
-  // --- CRUD (Create, Read, Update, Delete) ---
+  // Effet pour charger les données à chaque changement de 'timeframe'
+  useEffect(() => {
+    fetchDataFromAPI();
+  }, [timeframe, fetchDataFromAPI]);
 
-  const resetForm = () => {
-    setForm({ idRdv: '', dateConsult: '', compteRendu: '', prix: '' });
-    setEditingId(null);
-  };
-
-  // Enregistrement / Modification
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (!form.idRdv || !form.dateConsult || !form.compteRendu.trim()) {
-      showNotification('Veuillez remplir tous les champs obligatoires.', 'error');
-      return;
-    }
-
-    const dateTimeValue = form.dateConsult.length === 16 
-      ? `${form.dateConsult}:00` 
-      : form.dateConsult;
-
-    const payload = {
-      idRdv: parseInt(form.idRdv),
-      dateConsult: dateTimeValue,
-      compteRendu: form.compteRendu.trim(),
-      prix: form.prix ? parseFloat(form.prix) : null
-    };
-
-    try {
-      if (editingId) {
-        await axios.put(`${API_BASE_URL}/consultations/${editingId}`, payload);
-        showNotification('Consultation modifiée avec succès !');
-      } else {
-        await axios.post(`${API_BASE_URL}/consultations`, payload);
-        showNotification('Consultation enregistrée avec succès !');
-      }
-      resetForm();
-      fetchAll();
-      setShowForm(false);
-    } catch (err) {
-      console.error("Erreur enregistrement:", err.response?.data || err);
-      showNotification(err.response?.data?.error || 'Erreur serveur lors de l\'opération.', 'error');
-    }
-  };
-
-  const handleEdit = (consult) => {
-    const dateStr = consult.dateConsult || '';
-    setForm({
-      idRdv: consult.idRdv,
-      dateConsult: dateStr.replace(' ', 'T').substring(0, 16),
-      compteRendu: consult.compteRendu || '',
-      prix: consult.prix || ''
-    });
-    setEditingId(consult.idConsult);
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Supprimer définitivement cette consultation ? Cette action est irréversible.')) return;
-    try {
-      await axios.delete(`${API_BASE_URL}/consultations/${id}`);
-      showNotification('Consultation supprimée avec succès.');
-      fetchAll();
-    } catch (err) {
-      console.error("Erreur suppression:", err);
-      showNotification('Erreur lors de la suppression.', 'error');
-    }
-  };
-
-  // --- RENDU DU COMPOSANT ---
+  const metrics = calculateMetrics(chartData);
+  const dataKeyName = timeframe.charAt(0).toUpperCase() + timeframe.slice(1);
+  const dataKeyForXAxis = chartData.length > 0 ? Object.keys(chartData[0])[0] : 'Day';
 
   return (
-    <>
-      {/* Notification Toast */}
-      {notification.show && (
-        <div className={`fixed top-6 right-6 z-50 px-6 py-4 rounded-xl shadow-2xl text-white font-medium flex items-center gap-3 ${
-          notification.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
-        } transition-all duration-300 transform animate-fade-in`}>
-          {notification.type === 'success' ? '✓' : '✕'} {notification.message}
-        </div>
-      )}
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-inter">
+      <header className="mb-8">
+        <h1 className="text-3xl font-extrabold text-gray-800">
+          Financial Overview Dashboard
+        </h1>
+        <p className="text-gray-500">Visualisation des revenus, dépenses et solde net (Source: API Backend).</p>
+      </header>
 
-      <div className="min-h-screen bg-gray-50 p-6 md:p-10">
-        <div className="max-w-7xl mx-auto">
-
-          {/* Titre et Design Médical */}
-          <div className="text-center mb-10">
-            <h1 className="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-green-600">
-              Dossiers & Consultations Médicales
-            </h1>
-            <p className="text-gray-500 mt-2 font-light">Gestion des diagnostics, comptes rendus et factures</p>
-          </div>
-
-          {/* Contrôle d'Impression PDF */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-red-100 flex flex-col md:flex-row justify-between items-center gap-4">
-              <h2 className="text-xl font-semibold text-red-800 flex items-center gap-2">
-                  <PrinterIcon className="h-6 w-6" /> Impression de Rapport PDF par Date
-              </h2>
-              <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                  <input
-                      type="date"
-                      value={pdfDate}
-                      onChange={(e) => setPdfDate(e.target.value)}
-                      className="w-full sm:w-44 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none"
-                  />
-                  <button 
-                      onClick={handlePrintPdf} 
-                      className="w-full sm:w-auto px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 font-medium shadow-md"
-                  >
-                      Générer PDF
-                  </button>
-              </div>
-          </div>
-
-
-          {/* Barre de recherche (Filtres) */}
-          <div className="bg-white rounded-2xl shadow-lg p-6 mb-8 border border-blue-100">
-            <h2 className="text-xl font-semibold text-blue-800 mb-4 flex items-center gap-2">
-                <MagnifyingGlassIcon className="h-6 w-6" /> Filtres de Recherche
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
-              <input
-                type="text"
-                placeholder="Nom Patient..."
-                value={search.patient}
-                onChange={(e) => setSearch({ ...search, patient: e.target.value })}
-                className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Nom Praticien..."
-                value={search.praticien}
-                onChange={(e) => setSearch({ ...search, praticien: e.target.value })}
-                className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <input
-                type="date"
-                value={search.date}
-                onChange={(e) => setSearch({ ...search, date: e.target.value })}
-                className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Mot-clé Compte Rendu..."
-                value={search.compteRendu}
-                onChange={(e) => setSearch({ ...search, compteRendu: e.target.value })}
-                className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-              <div className="flex gap-3 justify-end lg:col-span-1 sm:col-span-2">
-                <button 
-                    onClick={handleSearch} 
-                    className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 font-medium"
-                >
-                  <MagnifyingGlassIcon className="h-5 w-5" /> Chercher
-                </button>
-                <button 
-                    onClick={() => { setSearch({ patient: '', praticien: '', date: '', compteRendu: '' }); fetchAll(); }} 
-                    className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl hover:bg-gray-300 transition font-medium"
-                >
-                  Effacer
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Bouton Cacher / Afficher Formulaire */}
-          <div className="flex justify-end mb-6">
-            <button 
-                onClick={() => { setShowForm(!showForm); resetForm(); }}
-                className={`px-6 py-3 rounded-xl transition flex items-center gap-2 font-medium shadow-md ${showForm ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
-            >
-                {showForm ? (
-                    <>
-                        <ChevronUpIcon className="h-5 w-5" /> Cacher le formulaire
-                    </>
-                ) : (
-                    <>
-                        <PlusIcon className="h-5 w-5" /> Nouvelle consultation
-                    </>
-                )}
-            </button>
-          </div>
-
-          {/* Formulaire (Conditionnel) */}
-          <div className={`bg-white rounded-2xl shadow-2xl p-8 mb-10 border border-blue-100 transition-all duration-500 overflow-hidden ${showForm ? 'max-h-screen opacity-100' : 'max-h-0 opacity-0 p-0 mb-0'}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-3xl font-bold text-blue-700 flex items-center gap-3">
-                {editingId ? <PencilSquareIcon className="h-8 w-8" /> : <PlusIcon className="h-8 w-8" />}
-                {editingId ? `Modification: Consultation #${editingId}` : 'Enregistrer une nouvelle consultation'}
-              </h2>
-              {editingId && (
-                <button onClick={() => {resetForm(); setShowForm(false);}} className="text-red-500 hover:text-red-700 transition">
-                  <XMarkIcon className="h-8 w-8" />
-                </button>
-              )}
-            </div>
-
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Rendez-vous (Select) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <UserGroupIcon className="inline h-5 w-5 mr-1 text-blue-500" /> Rendez-vous lié *
-                </label>
-                <select
-                  value={form.idRdv}
-                  onChange={(e) => setForm({ ...form, idRdv: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                >
-                  <option value="">Sélectionner un Rdv (obligatoire)</option>
-                  {rendezvous.map(rdv => (
-                    <option key={rdv.idRdv} value={rdv.idRdv}>
-                      Rdv #{rdv.idRdv} : {getPatientName(rdv.cinPatient)} / {getPraticienName(rdv.cinPraticien)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Date & Heure (DateTime-Local) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <CalendarIcon className="inline h-5 w-5 mr-1 text-blue-500" /> Date et heure *
-                </label>
-                <input
-                  type="datetime-local"
-                  value={form.dateConsult}
-                  onChange={(e) => setForm({ ...form, dateConsult: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white"
-                />
-              </div>
-
-              {/* Prix (Number) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <CurrencyDollarIcon className="inline h-5 w-5 mr-1 text-green-500" /> Prix (DA)
-                </label>
-                <input
-                  type="number"
-                  step="100"
-                  placeholder="Ex: 5000"
-                  value={form.prix}
-                  onChange={(e) => setForm({ ...form, prix: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              
-              <div className="hidden lg:block"></div> 
-
-              {/* Compte rendu (Textarea) */}
-              <div className="md:col-span-2 lg:col-span-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  <DocumentTextIcon className="inline h-5 w-5 mr-1 text-blue-500" /> Compte rendu médical *
-                </label>
-                <textarea
-                  rows="4"
-                  value={form.compteRendu}
-                  onChange={(e) => setForm({ ...form, compteRendu: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                  placeholder="Diagnostic, détails de l'examen, traitements prescrits..."
-                />
-              </div>
-
-              {/* Boutons */}
-              <div className="lg:col-span-4 flex justify-end gap-4 mt-4">
-                <button type="button" onClick={resetForm} className="px-8 py-3 bg-gray-300 text-gray-700 rounded-xl hover:bg-gray-400 transition font-medium">
-                  Effacer les champs
-                </button>
-                <button type="submit" className="px-8 py-3 bg-gradient-to-r from-blue-600 to-green-600 text-white rounded-xl hover:shadow-xl transform hover:scale-[1.02] transition font-medium shadow-lg">
-                  {editingId ? 'Mettre à jour la consultation' : 'Enregistrer la consultation'}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Tableau Desktop */}
-          <div className="hidden lg:block bg-white rounded-2xl shadow-xl overflow-hidden border border-blue-200">
-            <table className="w-full">
-              <thead className="bg-blue-600 text-white sticky top-0">
-                <tr>
-                  <th className="px-6 py-4 text-left font-semibold">ID</th>
-                  <th className="px-6 py-4 text-left font-semibold">Patient / Praticien</th> {/* Colonne combinée */}
-                  <th className="px-6 py-4 text-left font-semibold">Date & Heure</th>
-                  <th className="px-6 py-4 text-left font-semibold">Prix</th>
-                  <th className="px-6 py-4 text-left font-semibold max-w-sm">Compte rendu</th>
-                  <th className="px-6 py-4 text-center font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={6} className="text-center py-16 text-blue-500 text-xl font-medium animate-pulse">
-                    <DocumentTextIcon className="h-6 w-6 inline mr-2" /> Chargement des dossiers médicaux...
-                  </td></tr>
-                ) : paginated.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-16 text-gray-500 text-lg">
-                    Aucune consultation trouvée.
-                  </td></tr>
-                ) : paginated.map(c => {
-                  const rdv = getRdvDetails(c.idRdv);
-                  return (
-                    <tr key={c.idConsult} className="border-t border-gray-100 hover:bg-blue-50 transition">
-                      <td className="px-6 py-4 font-bold text-blue-700">#{c.idConsult}</td>
-                      <td className="px-6 py-4 text-gray-800">
-                        <div className="flex items-center gap-2 mb-1">
-                            <UserGroupIcon className="h-5 w-5 text-blue-400"/> 
-                            <span className="font-bold">{rdv ? getPatientName(rdv.cinPatient) : '—'}</span>
-                        </div>
-                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                            <AcademicCapIcon className="h-4 w-4 text-green-400"/> 
-                            <span>{rdv ? getPraticienName(rdv.cinPraticien) : '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600 font-mono text-sm">{formatDateTime(c.dateConsult)}</td>
-                      <td className="px-6 py-4 font-extrabold text-lg">
-                        {c.prix ? (
-                            <span className="text-green-600">{Number(c.prix).toLocaleString()} DA</span>
-                        ) : (
-                            <span className="text-gray-500">Gratuit</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 max-w-xs text-sm text-gray-700 truncate hover:whitespace-normal hover:overflow-visible transition-all duration-300">
-                        {c.compteRendu || '—'}
-                      </td>
-                      <td className="px-6 py-4 text-center space-x-4">
-                        <button onClick={() => handleEdit(c)} title="Modifier" className="text-blue-600 hover:text-blue-800 transition">
-                          <PencilSquareIcon className="h-6 w-6" />
-                        </button>
-                        <button onClick={() => handleDelete(c.idConsult)} title="Supprimer" className="text-red-600 hover:text-red-800 transition">
-                          <TrashIcon className="h-6 w-6" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Cartes Mobile */}
-          <div className="lg:hidden grid gap-6 mt-8">
-            {loading ? (
-                <div className="text-center py-10 text-blue-500 text-xl font-medium animate-pulse">Chargement...</div>
-            ) : paginated.length === 0 ? (
-                <div className="text-center py-10 text-gray-500 text-lg">Aucune consultation trouvée.</div>
-            ) : paginated.map(c => {
-              const rdv = getRdvDetails(c.idRdv);
-              return (
-                <div key={c.idConsult} className="bg-white rounded-2xl shadow-lg p-6 border-l-8 border-blue-500">
-                  <div className="flex justify-between items-center mb-4 border-b pb-3 border-gray-100">
-                    <h3 className="text-2xl font-extrabold text-blue-700">Dossier #{c.idConsult}</h3>
-                    <span className={`px-4 py-1 rounded-full text-sm font-bold shadow-sm ${c.prix ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-700'}`}>
-                      {c.prix ? `${Number(c.prix).toLocaleString()} DA` : 'Gratuit'}
-                    </span>
-                  </div>
-                  <div className="space-y-3 text-gray-700 mt-4">
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                        <p className="flex items-center gap-2 text-sm text-gray-600 mb-1"><UserGroupIcon className="h-4 w-4 text-blue-500" /> **Patient :**</p> 
-                        <span className="font-semibold text-base block ml-6">{rdv ? getPatientName(rdv.cinPatient) : '—'}</span>
-                        <p className="flex items-center gap-2 text-sm text-gray-600 mt-2 mb-1"><AcademicCapIcon className="h-4 w-4 text-green-500" /> **Praticien :**</p> 
-                        <span className="font-semibold text-base block ml-6">{rdv ? getPraticienName(rdv.cinPraticien) : '—'}</span>
-                    </div>
-                    <p className="flex items-center gap-2"><CalendarIcon className="h-5 w-5 text-gray-500" /> <strong>Date :</strong> {formatDateTime(c.dateConsult)}</p>
-                    <div className="pt-3 border-t mt-3 border-gray-100">
-                        <p className="text-sm font-semibold text-gray-600 mb-1">Compte rendu :</p>
-                        <p className="text-base italic text-gray-800">{c.compteRendu || '—'}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-4 mt-6 border-t pt-4">
-                    <button onClick={() => handleEdit(c)} className="flex-1 bg-blue-600 text-white py-3 rounded-xl hover:bg-blue-700 transition font-medium shadow-md">
-                      <PencilSquareIcon className="h-5 w-5 inline mr-1" /> Modifier
-                    </button>
-                    <button onClick={() => handleDelete(c.idConsult)} className="flex-1 bg-red-600 text-white py-3 rounded-xl hover:bg-red-700 transition font-medium shadow-md">
-                      <TrashIcon className="h-5 w-5 inline mr-1" /> Supprimer
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-6 mt-12">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-6 py-3 bg-blue-100 text-blue-700 rounded-xl disabled:opacity-50 hover:bg-blue-200 transition font-medium flex items-center gap-2"
-              >
-                <ChevronDownIcon className="h-5 w-5 rotate-90"/> Précédent
-              </button>
-              <span className="text-xl font-bold text-gray-700">Page {page} / {totalPages}</span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-6 py-3 bg-blue-100 text-blue-700 rounded-xl disabled:opacity-50 hover:bg-blue-200 transition font-medium flex items-center gap-2"
-              >
-                Suivant <ChevronUpIcon className="h-5 w-5 rotate-90"/>
-              </button>
-            </div>
-          )}
-        </div>
+      {/* --- Timeframe Selector --- */}
+      <div className="mb-8 flex space-x-3">
+        <TimeframeButton timeframe="weekly" current={timeframe} onClick={setTimeframe} />
+        <TimeframeButton timeframe="monthly" current={timeframe} onClick={setTimeframe} />
+        <TimeframeButton timeframe="yearly" current={timeframe} onClick={setTimeframe} />
       </div>
-    </>
+
+      {/* --- Key Metrics Grid (Revenu, Dépense, Solde Net, Total Activités) --- */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+        <StatCard
+          title={`Solde Net (${dataKeyName})`}
+          value={metrics.netBalance}
+          icon={TrendingUp}
+          color={metrics.netBalanceColor.includes('green') ? "bg-green-500" : "bg-red-500"}
+          valueColor={metrics.netBalanceColor}
+        />
+        <StatCard
+          title={`Total Revenue (${dataKeyName})`}
+          value={metrics.totalRevenue}
+          icon={DollarSign}
+          color="bg-blue-500"
+        />
+        <StatCard
+          title={`Total Dépense (${dataKeyName})`}
+          value={metrics.totalDepense}
+          icon={MinusCircle}
+          color="bg-orange-500"
+        />
+        <StatCard
+          title={`Total Activités (${dataKeyName})`}
+          value={metrics.totalActivities}
+          icon={BarChart3}
+          color="bg-purple-500"
+        />
+      </div>
+
+      {/* --- Chart Panel --- */}
+      <div className="bg-white p-6 rounded-xl shadow-2xl h-96 w-full overflow-hidden">
+        <h2 className="text-xl font-semibold mb-4 text-gray-800">Revenue vs. Dépense</h2>
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full text-blue-500">
+             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Chargement des données...
+          </div>
+        ) : chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height="90%">
+            <AreaChart
+              data={chartData}
+              margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+            >
+              <defs>
+                {/* Dégradé pour le Revenu (Bleu) */}
+                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                </linearGradient>
+                {/* Dégradé pour la Dépense (Orange) */}
+                <linearGradient id="colorDepense" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.8} />
+                  <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+              <XAxis dataKey={dataKeyForXAxis} tickLine={false} axisLine={false} />
+              
+              {/* Axe Y pour le Revenu/Dépense (Gauche) */}
+              <YAxis yAxisId="left" stroke="#3b82f6" orientation="left" tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`} />
+              
+              <Tooltip
+                contentStyle={{ borderRadius: '8px', border: '1px solid #e0e0e0', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                labelStyle={{ fontWeight: 'bold' }}
+                formatter={(value, name) => [`$${value.toFixed(2)}`, name]}
+              />
+              <Legend wrapperStyle={{ paddingTop: '20px' }} />
+              
+              {/* Courbe du Revenu */}
+              <Area
+                type="monotone"
+                dataKey="Revenue"
+                name="Revenu"
+                yAxisId="left"
+                stroke="#3b82f6"
+                fillOpacity={1}
+                fill="url(#colorRevenue)"
+                activeDot={{ r: 6 }}
+              />
+              
+              {/* Courbe de la Dépense */}
+              <Area
+                type="monotone"
+                dataKey="Depense"
+                name="Dépense"
+                yAxisId="left"
+                stroke="#f97316"
+                fillOpacity={1}
+                fill="url(#colorDepense)"
+                activeDot={{ r: 6 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-red-500">
+            <p className="font-bold text-lg mb-2">Aucune donnée disponible.</p>
+            <p className="text-sm">Vérifiez que votre API backend est démarrée et accessible à l'adresse: {API_BASE_URL}</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
-}
+};
+
+export default App;

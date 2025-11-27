@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { FaUserShield, FaSignInAlt, FaSpinner, FaCheckCircle, FaExclamationCircle, FaEye, FaEyeSlash } from 'react-icons/fa'; // Ajout FaEye et FaEyeSlash
+// NOUVEAU : onAdminLogin est accepté comme prop
+import { FaUserShield, FaSignInAlt, FaSpinner, FaCheckCircle, FaExclamationCircle, FaEye, FaEyeSlash } from 'react-icons/fa'; 
 
-const AdminAuth = () => {
+// Accepter onAdminLogin comme prop
+const AdminAuth = ({ onAdminLogin }) => { 
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false); // Nouvelle fonctionnalité
+  const [showPassword, setShowPassword] = useState(false); 
   const navigate = useNavigate();
 
   const handleChange = e => {
@@ -37,6 +39,11 @@ const AdminAuth = () => {
         // Sauvegarder le token si nécessaire ici
         // localStorage.setItem('adminToken', res.data.token);
         
+        // 🚀 ACTION CLÉ : Appeler la fonction du parent pour changer le Navbar
+        if (onAdminLogin) {
+            onAdminLogin(); 
+        }
+
         setTimeout(() => {
           navigate('/admindas'); // Redirection vers le tableau de bord admin
         }, 1200); 

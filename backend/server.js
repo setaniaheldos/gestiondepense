@@ -11,7 +11,7 @@ app.use(express.json());
 
 // Connexion à PostgreSQL via Render (utilisez DATABASE_URL en env var)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://test_i472_user:QGmSbQ68uNbXw4OPGIo7wmmcNFyWCAAf@dpg-d4j9pj75r7bs73f9b9u0-a.oregon-postgres.render.com/test_i472',
+  connectionString: process.env.DATABASE_URL || 'postgresql://test_gfik_user:Bt4dBLWSBUp192ATekkU6GZWGjwJIMq9@dpg-d4k9eqogjchc73a1ioeg-a.oregon-postgres.render.com/test_gfik',
   ssl: { rejectUnauthorized: false } // Nécessaire pour Render
 });
 

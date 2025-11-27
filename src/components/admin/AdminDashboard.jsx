@@ -1,346 +1,499 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
-import { FaUserTie, FaUsers, FaTrash, FaHome, FaUserPlus, FaUserCheck, FaSpinner, FaLockOpen, FaClock, FaTimesCircle, FaStethoscope, FaHospital, FaUserMd, FaCheckCircle } from 'react-icons/fa';
+import React, { useState, useEffect } from 'react';
+// Si vous utilisez React Router, vous devez décommenter l'importation de Link.
+// import { Link } from 'react-router-dom'; 
+// NOTE : J'utilise ici un simple <a> tag pour éviter l'erreur si Link n'est pas importé.
+// Si vous voulez utiliser Link, vous devrez l'importer dans votre fichier.
 
-const API_BASE_URL = 'https://mon-api-rmv3.onrender.com';
+// NOTE: L'URL de l'API est définie ici. Assurez-vous qu'elle est correcte.
+const API_BASE = 'https://mon-api-rmv3.onrender.com';
 
-const AdminDashboard = () => {
-  const [admins, setAdmins] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [loadingAdmins, setLoadingAdmins] = useState(true);
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const [message, setMessage] = useState('');
+const TransactionManager = () => {
+  const [transactions, setTransactions] = useState([]);
+  const [formData, setFormData] = useState({ categorie: '', montant: '', description: '' });
+  const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [apiStatus, setApiStatus] = useState('non testé');
+  // NOUVEL ÉTAT : Gère la visibilité du formulaire d'ajout/édition
+  const [isFormVisible, setIsFormVisible] = useState(true);
+  
+  // État pour le thème. Initialise en fonction de la préférence système ou à 'light'.
+  const [theme, setTheme] = useState(
+    localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  );
 
-  const showMessage = (msg, duration = 3000) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(''), duration);
-  };
-
-  // Fonction pour charger toutes les données
-  const fetchAllData = useCallback(async () => {
-    setLoadingAdmins(true);
-    setLoadingUsers(true);
-    try {
-        const [adminsRes, usersRes] = await Promise.all([
-            axios.get(`${API_BASE_URL}/admins`),
-            axios.get(`${API_BASE_URL}/users`)
-        ]);
-        setAdmins(adminsRes.data);
-        setUsers(usersRes.data);
-    } catch (err) {
-        showMessage("❌ Erreur de connexion : impossible de charger les données Administrateurs/Utilisateurs.");
-    } finally {
-        setLoadingAdmins(false);
-        setLoadingUsers(false);
-    }
-  }, []); 
-
-  // Chargement initial
+  // LOGIQUE DU THÈME : Appliquer la classe 'dark' au corps du document
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]); 
-
-  // Supprimer un admin (sauf le premier)
-  const handleDeleteAdmin = async (id, idx) => {
-    // Correction : Assurer que l'ID est un entier pour la comparaison
-    const adminId = parseInt(id); 
-    
-    if (idx === 0) {
-        showMessage("⚠️ Le premier administrateur n'est pas supprimable pour garantir l'accès.", 4000);
-        return;
-    } 
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet Administrateur ?")) return;
-    try {
-      await axios.delete(`${API_BASE_URL}/admins/${adminId}`);
-      setAdmins(prevAdmins => prevAdmins.filter(a => a.id !== adminId)); 
-      showMessage("🗑️ Administrateur supprimé avec succès !");
-    } catch {
-      showMessage("❌ Erreur lors de la suppression de l'administrateur.");
+    const html = document.documentElement;
+    if (theme === 'dark') {
+      html.classList.add('dark');
+    } else {
+      html.classList.remove('dark');
     }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Fonction pour basculer le thème
+  const toggleTheme = () => {
+    setTheme(currentTheme => (currentTheme === 'light' ? 'dark' : 'light'));
   };
 
-  // 📢 CORRECTION APPLIQUÉE : Valider un utilisateur
-  const approveUser = async (id) => {
-    // Correction : Assurer que l'ID est un entier pour la comparaison de l'état
-    const userId = parseInt(id); 
+  const logApiStatus = (status, details = '') => {
+    console.log(`[API STATUS] ${status}: ${details}`);
+    setApiStatus(`${status} (${details})`);
+  };
 
+  // Fonction pour charger les transactions depuis l'API
+  const loadTransactions = async () => {
+    setLoading(true);
+    setError('');
+    logApiStatus('loading', 'Début du fetch...');
     try {
-      // Appel à l'API
-      await axios.put(`${API_BASE_URL}/users/${userId}/approve`);
-      
-      // Mise à jour de l'état local : on utilise l'ID converti
-      setUsers(prevUsers => 
-        prevUsers.map(u => u.id === userId ? { ...u, isApproved: 1 } : u)
-      );
-      showMessage("✅ Utilisateur validé avec succès ! (Statut mis à jour)");
+      const response = await fetch(`${API_BASE}/transactions`);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText || 'Erreur serveur'}`);
+      }
+
+      const data = await response.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error('Données invalides (pas un tableau)');
+      }
+
+      setTransactions(data);
+      logApiStatus('succès', `${data.length} transactions chargées`);
     } catch (err) {
-      // Afficher une erreur plus spécifique si possible
-      const errorMsg = err.response?.data?.error || "Erreur lors de la validation.";
-      showMessage(`❌ ${errorMsg}`);
+      console.error('[FETCH ERROR] Plein détail:', err);
+      setError(err.message);
+      logApiStatus('échec', err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
+  useEffect(() => {
+    loadTransactions();
+    // Utiliser window.confirm est une mauvaise pratique en Iframe, 
+    // on le remplace par une fonction qui imite la confirmation.
+    window.confirm = (message) => {
+        return prompt(message + " (Tappez 'oui' pour confirmer)")?.toLowerCase() === 'oui';
+    };
+  }, []);
 
-  // Supprimer un utilisateur
-  const handleDeleteUser = async (id) => {
-    // Correction : Assurer que l'ID est un entier pour la comparaison
-    const userId = parseInt(id); 
+  const handleInputChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
-    if (!window.confirm("Êtes-vous sûr de vouloir supprimer cet Utilisateur ?")) return;
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.categorie.trim()) {
+      setError('Type de catégorie (dépense/revenu) requis');
+      return;
+    }
+    const montantNum = parseFloat(formData.montant);
+    if (isNaN(montantNum) || montantNum === 0) {
+      setError('Montant doit être un nombre non nul');
+      return;
+    }
+
+    // Le backend exige que la catégorie soit 'depense' ou 'revenu'
+    const submitData = { 
+      categorie: formData.categorie.trim().toLowerCase(), 
+      montant: montantNum,
+      // Assure l'envoi d'une chaîne (trim) au lieu de 'null' si le champ est vide.
+      description: formData.description.trim() 
+    };
+
+    setLoading(true);
+    setError('');
+    const isEdit = !!editingId;
+    const endpoint = isEdit ? `${API_BASE}/transactions/${editingId}` : `${API_BASE}/transactions`;
+    const method = isEdit ? 'PUT' : 'POST';
+
     try {
-      await axios.delete(`${API_BASE_URL}/users/${userId}`);
-      // Mise à jour rapide de l'UI
-      setUsers(prevUsers => prevUsers.filter(u => u.id !== userId));
-      showMessage("🗑️ Utilisateur archivé/supprimé avec succès !");
-    } catch {
-      showMessage("❌ Erreur lors de la suppression de l'utilisateur.");
+      const response = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submitData),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        // Afficher l'erreur ENUM du backend si elle est présente
+        if (errText.includes('invalid input value for enum')) {
+            throw new Error(`Erreur API: La catégorie doit être 'depense' ou 'revenu'.`);
+        }
+        throw new Error(`${method} HTTP ${response.status}: ${errText}`);
+      }
+
+      await response.json();
+      // RÉINITIALISATION et cache le formulaire après succès
+      setFormData({ categorie: '', montant: '', description: '' });
+      setEditingId(null);
+      setIsFormVisible(false); // Cache le formulaire après un ajout/modification réussi
+      await loadTransactions();
+      logApiStatus('opération réussie', isEdit ? 'mise à jour' : 'ajout');
+    } catch (err) {
+      console.error(`[${method} FULL ERROR]:`, err);
+      setError(err.message);
+      logApiStatus('opération échouée', err.message);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const editTransaction = async (id) => {
+    try {
+      const response = await fetch(`${API_BASE}/transactions/${id}`);
+      if (!response.ok) throw new Error(`GET ${response.status}`);
+      const transaction = await response.json();
+      setFormData({ 
+        categorie: transaction.categorie || '', 
+        montant: transaction.montant ? transaction.montant.toString() : '',
+        // RÉCUPÉRATION DE LA DESCRIPTION
+        description: transaction.description || '' 
+      });
+      setEditingId(id);
+      setIsFormVisible(true); // Ouvre le formulaire en mode édition
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteTransaction = async (id) => {
+    // Utilisation d'une simulation de prompt au lieu de window.confirm()
+    if (!window.confirm('Confirmer la suppression ?')) return; 
+    try {
+      const response = await fetch(`${API_BASE}/transactions/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`DELETE ${response.status}`);
+      await loadTransactions();
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const cancelEdit = () => {
+    // RÉINITIALISATION AVEC DESCRIPTION
+    setFormData({ categorie: '', montant: '', description: '' });
+    setEditingId(null);
+    setIsFormVisible(false); // Cache le formulaire après annulation
+  };
+
+  const refresh = () => loadTransactions();
+  
+  // Détermination de la couleur en fonction du montant pour le tableau
+  const getMontantColor = (montant) => {
+    const numMontant = parseFloat(montant || 0);
+    if (numMontant < 0) {
+      return 'text-red-500 font-semibold'; // Dépense 
+    } else if (numMontant > 0) {
+      return 'text-green-500 font-semibold'; // Revenu
+    }
+    return 'text-gray-900 dark:text-gray-100'; // Neutre
+  };
+
+  // LOGIQUE : Calcul du sommaire et regroupement par type
+  const calculateSummary = () => {
+    return transactions.reduce((acc, transaction) => {
+        const montantNum = parseFloat(transaction.montant || 0);
+        const category = (transaction.categorie || '').toLowerCase();
+        const absMontant = Math.abs(montantNum);
+
+        // Grouping
+        if (!acc.grouped[category]) {
+            acc.grouped[category] = [];
+        }
+        acc.grouped[category].push(transaction);
+
+        // Summing for Category Totals (using absolute magnitude for display)
+        if (category === 'revenu') {
+            acc.totalRevenuMagnitude += absMontant; // magnitude of all revenue
+        } else if (category === 'depense') {
+            acc.totalDepenseMagnitude += absMontant; // magnitude of all expense
+        }
+
+        // Balance Calculation (relying on the sign for net change)
+        acc.balance += montantNum; 
+
+        return acc;
+    }, {
+        totalRevenuMagnitude: 0,
+        totalDepenseMagnitude: 0,
+        balance: 0,
+        grouped: { revenu: [], depense: [] }
+    });
+  };
+
+  const summary = calculateSummary();
+  const revenues = summary.grouped.revenu || [];
+  const expenses = summary.grouped.depense || [];
+
+
+  // Fonction utilitaire pour rendre un tableau de transactions
+  const renderTransactionTable = (title, list, colorClass) => (
+    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden mb-8 border border-gray-200 dark:border-gray-700">
+      <div className={`px-6 py-4 bg-${colorClass}-50 dark:bg-${colorClass}-900 border-b border-${colorClass}-100 dark:border-${colorClass}-700 text-lg font-bold text-gray-700 dark:text-gray-200`}>
+        {title} ({list.length} transactions)
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-700">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">#ID</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Montant</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Description</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date/Heure</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+            {list.length === 0 ? (
+                <tr>
+                    <td colSpan="5" className="px-6 py-4 text-center text-gray-500 dark:text-gray-400 italic">
+                        Aucune transaction de ce type pour l'instant.
+                    </td>
+                </tr>
+            ) : (
+                list.map((transaction) => (
+                <tr key={transaction.id} className="hover:bg-blue-50 dark:hover:bg-gray-700 transition duration-100">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{transaction.id}</td>
+                    <td className={`px-6 py-4 whitespace-nowrap text-sm ${getMontantColor(transaction.montant)}`}>
+                        {/* Formatage amélioré */}
+                        {parseFloat(transaction.montant || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-800 dark:text-gray-200 max-w-xs truncate" title={transaction.description}>
+                        {transaction.description || 'N/A'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+                        {new Date(transaction.date).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
+                        <button
+                            onClick={() => editTransaction(transaction.id)}
+                            className="text-blue-600 hover:text-blue-800 text-sm font-semibold transition duration-150 dark:text-blue-400 dark:hover:text-blue-500"
+                            title="Éditer la transaction"
+                        >
+                            ✏️ Éditer
+                        </button>
+                        <button
+                            onClick={() => deleteTransaction(transaction.id)}
+                            className="text-red-500 hover:text-red-700 text-sm font-semibold transition duration-150 dark:text-red-400 dark:hover:text-red-500"
+                            title="Supprimer la transaction"
+                        >
+                            🗑️ Supprimer
+                        </button>
+                    </td>
+                </tr>
+            )))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-blue-50 to-cyan-50 dark:from-teal-900 dark:via-blue-900 dark:to-cyan-900 p-6 relative overflow-hidden">
-      {/* ... (Éléments décoratifs inchangés) ... */}
-      <div className="absolute inset-0 opacity-10 pointer-events-none">
-        <div className="absolute top-10 left-10 text-6xl">⚕️</div>
-        <div className="absolute top-1/4 right-20 text-4xl">🩺</div>
-        <div className="absolute bottom-20 left-1/4 text-5xl">💊</div>
-        <div className="absolute bottom-10 right-10 text-6xl">🏥</div>
-        <div className="absolute top-1/2 left-20 text-4xl">➕</div>
-      </div>
-
-      <div className="max-w-6xl mx-auto mt-8 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm p-10 rounded-2xl shadow-2xl border-t-4 border-teal-500 dark:border-teal-400 transition duration-500 relative z-10">
-        
-        {/* En-tête avec thème médical */}
-        <div className="text-center mb-10">
-          <div className="flex items-center justify-center mb-4">
-            <div className="bg-teal-100 dark:bg-teal-900 p-4 rounded-full mr-4">
-              <FaHospital className="text-3xl text-teal-600 dark:text-teal-400" />
-            </div>
-            <h2 className="text-4xl font-extrabold text-gray-900 dark:text-gray-100 bg-gradient-to-r from-teal-600 to-blue-600 bg-clip-text text-transparent">
-              Tableau de Bord d'Administrateurs
-            </h2>
-          </div>
-          <p className="text-gray-600 dark:text-gray-300 text-lg mt-2">
-            Gestion des accès administrateurs et utilisateurs du système médical
-          </p>
-        </div>
-        
-        {/* Message de Statut */}
-        {message && (
-          <div className={`mb-6 px-6 py-4 rounded-xl font-medium text-center shadow-lg border-l-4 ${
-            message.includes('succès') || message.includes('🗑️') ? 'bg-green-50 text-green-800 dark:bg-green-900/50 dark:text-green-300 border-green-500' 
-            : message.includes('⚠️') ? 'bg-yellow-50 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300 border-yellow-500'
-            : 'bg-red-50 text-red-800 dark:bg-red-900/50 dark:text-red-300 border-red-500'
-          } animate-fade-in-up backdrop-blur-sm`}>
-            <div className="flex items-center justify-center">
-              {message.includes('succès') && <FaUserCheck className="mr-2" />}
-              {message.includes('🗑️') && <FaTrash className="mr-2" />}
-              {message.includes('Erreur') || message.includes('⚠️') && <FaTimesCircle className="mr-2" />}
-              {message}
-            </div>
-          </div>
-        )}
-        
-        <div className="mb-10 grid grid-cols-1 lg:grid-cols-2 gap-8">
+    // Le padding a été ajusté pour rester agréable sur les grands écrans.
+    <div className="p-4 md:p-10 bg-gray-100 dark:bg-gray-900 min-h-screen w-full font-[Inter]"> 
+      <header className="flex justify-between items-start mb-8 border-b-4 border-blue-500 pb-2">
+        <h1 className="text-4xl font-extrabold text-gray-800 dark:text-gray-100">
+            💰 Tableau de Bord des Transactions
+        </h1>
+        {/* MODIFICATION ICI : Conteneur pour les boutons de la barre de navigation */}
+        <div className="flex space-x-3 items-center"> 
             
-          {/* Tableau des administrateurs - Carte médicale (inchangé) */}
-          <div className="bg-gradient-to-br from-white to-teal-50 dark:from-gray-700 dark:to-teal-900/30 p-6 rounded-2xl shadow-lg border border-teal-100 dark:border-teal-800 hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center mb-6">
-              <div className="bg-teal-100 dark:bg-teal-800 p-3 rounded-lg mr-4">
-                <FaUserMd className="text-2xl text-teal-600 dark:text-teal-400" />
-              </div>
-              <h3 className="text-2xl font-bold text-teal-700 dark:text-teal-300">
-                Administrateurs ({admins.length})
-              </h3>
-            </div>
-            {loadingAdmins ? (
-              <div className="text-teal-600 text-center py-10 flex justify-center items-center">
-                <FaSpinner className="mr-3 animate-spin" /> 
-                Chargement des données médicales...
-              </div>
-            ) : admins.length === 0 ? (
-              <div className="text-gray-500 text-center py-10 bg-white/50 dark:bg-gray-600/50 rounded-lg">
-                Aucun administrateur médical trouvé.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs uppercase bg-teal-500/20 dark:bg-teal-900/50 text-teal-800 dark:text-teal-300">
-                    <tr>
-                      <th scope="col" className="p-4 text-left rounded-tl-lg">Email Professionnel</th>
-                      <th scope="col" className="p-4 text-center rounded-tr-lg">Privilèges</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {admins.map((admin, idx) => (
-                      <tr key={admin.id} className="bg-white/70 dark:bg-gray-700/70 border-b border-teal-100 dark:border-teal-800 hover:bg-teal-50/50 dark:hover:bg-teal-900/20 transition duration-150">
-                        <td className="p-4 font-medium text-gray-900 dark:text-white">
-                          <div className="flex items-center">
-                            <FaUserTie className="mr-3 text-teal-500" />
-                            {admin.email}
-                          </div>
-                        </td>
-                        <td className="p-4 text-center">
-                          {idx === 0 ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-300 text-xs font-bold">
-                              <FaLockOpen className="mr-1" /> Super Admin
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => handleDeleteAdmin(admin.id, idx)}
-                              className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 text-white font-bold text-xs uppercase shadow-md transition-all duration-200 transform hover:scale-105 flex items-center mx-auto"
-                            >
-                              <FaTrash className="mr-1" /> Révoquer
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            {/* NOUVEAU BOUTON : Vers Activités (utilise un <a> standard ou Link) */}
+            {/* Si vous utilisez React Router, remplacez <a> par <Link to="/activite">...</Link> */}
+            <a 
+                href="/praticiens" // Assurez-vous que cette URL est correcte
+                className="p-3 bg-blue-600 text-white font-semibold rounded-lg shadow-lg hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 transition duration-150 flex items-center"
+                title="Voir toutes les activités"
+            >
+                📊 Activités
+            </a>
 
-          {/* Tableau des utilisateurs - Carte patients (inchangé) */}
-          <div className="bg-gradient-to-br from-white to-blue-50 dark:from-gray-700 dark:to-blue-900/30 p-6 rounded-2xl shadow-lg border border-blue-100 dark:border-blue-800 hover:shadow-xl transition-all duration-300">
-            <div className="flex items-center mb-6">
-              <div className="bg-blue-100 dark:bg-blue-800 p-3 rounded-lg mr-4">
-                <FaUsers className="text-2xl text-blue-600 dark:text-blue-400" />
-              </div>
-              <h3 className="text-2xl font-bold text-blue-700 dark:text-blue-300">
-                Utilisateurs ({users.length})
-              </h3>
-            </div>
-            {loadingUsers ? (
-              <div className="text-blue-600 text-center py-10 flex justify-center items-center">
-                <FaSpinner className="mr-3 animate-spin" /> 
-                Chargement des utilisateurs...
-              </div>
-            ) : users.length === 0 ? (
-              <div className="text-gray-500 text-center py-10 bg-white/50 dark:bg-gray-600/50 rounded-lg">
-                Aucun utilisateur trouvé.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs uppercase bg-blue-500/20 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300">
-                    <tr>
-                      <th scope="col" className="p-4 text-left rounded-tl-lg">Email Sécretaire</th>
-                      <th scope="col" className="p-4 text-center">Statut</th>
-                      <th scope="col" className="p-4 text-center rounded-tr-lg">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map(user => (
-                      <tr key={user.id} className="bg-white/70 dark:bg-gray-700/70 border-b border-blue-100 dark:border-blue-800 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 transition duration-150">
-                        <td className="p-4 font-medium text-gray-900 dark:text-white">
-                          <div className="flex items-center">
-                            <FaStethoscope className="mr-3 text-blue-500" />
-                            {user.email}
-                          </div>
-                        </td>
-                        <td className="p-4 text-center">
-                          {/* Logique de statut */}
-                          {user.isApproved == 1 ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 text-xs font-bold">
-                              <FaUserCheck className="mr-1" /> Actif
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 text-xs font-bold">
-                              <FaClock className="mr-1" /> En attente
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-4 text-center flex justify-center gap-2 flex-wrap">
-                          
-                          {/* Affichage des boutons d'action conditionnel */}
-                          {user.isApproved == 1 ? (
-                            // Utilisateur ACTIF
-                            <button
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 text-white font-bold text-xs uppercase shadow-md transition-all duration-200 transform hover:scale-105 flex items-center"
-                              title="Archiver/Supprimer l'utilisateur actif"
-                            >
-                              <FaTimesCircle className="mr-1" /> Archiver
-                            </button>
-                          ) : (
-                            // Utilisateur EN ATTENTE
-                            <>
-                              <button
-                                onClick={() => approveUser(user.id)}
-                                className="px-4 py-2 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs uppercase shadow-md transition-all duration-200 transform hover:scale-105 flex items-center"
-                                title="Valider l'inscription de l'utilisateur"
-                              >
-                                <FaCheckCircle className="mr-1" /> Valider
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(user.id)}
-                                className="px-4 py-2 rounded-full bg-red-500 hover:bg-red-600 text-white font-bold text-xs uppercase shadow-md transition-all duration-200 transform hover:scale-105 flex items-center"
-                                title="Refuser et supprimer l'utilisateur en attente"
-                              >
-                                <FaTrash className="mr-1" /> Refuser
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            {/* Bouton de bascule du thème existant */}
+            {/* <button 
+                onClick={toggleTheme} 
+                className="p-3 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-yellow-400 shadow-lg hover:ring-2 ring-blue-500 transition duration-300"
+                title={`Passer au mode ${theme === 'light' ? 'Sombre' : 'Clair'}`}
+            >
+                {theme === 'light' ? '🌙' : '☀️'}
+            </button> */}
         </div>
+      </header>
 
-        {/* Boutons d'action avec style médical (inchangé) */}
-        <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-700 flex justify-center gap-6 flex-wrap">
-          <Link
-            to="/accueil"
-            className="px-8 py-4 rounded-xl bg-teal-500 hover:bg-teal-600 text-white font-bold transition-all duration-300 shadow-lg transform hover:scale-105 flex items-center group"
-          >
-            <FaHome className="mr-3 group-hover:scale-110 transition-transform" /> 
-            Accueil Médical
-          </Link>
-          <Link
-            to="/authen"
-            className="px-8 py-4 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-bold transition-all duration-300 shadow-lg transform hover:scale-105 flex items-center group"
-          >
-            <FaUserPlus className="mr-3 group-hover:scale-110 transition-transform" /> 
-            Nouveau Administrateur
-          </Link>
-          {/* Le bouton pour la page /action est conservé, mais moins nécessaire maintenant */}
-          <Link
-            to="/action"
-            className="px-8 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold transition-all duration-300 shadow-lg transform hover:scale-105 flex items-center group"
-          >
-            <FaUserCheck className="mr-3 group-hover:scale-110 transition-transform" /> 
-            (Ancienne) Validation
-          </Link>
+      {/* Statut API - Design compatible dark mode */}
+      <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 text-yellow-800 dark:text-yellow-200 rounded-xl shadow-inner flex flex-wrap justify-between items-center">
+        <div>
+            <strong>📢 Statut API :</strong> {apiStatus}
+            <br />
+            <small className="text-xs">Vérifiez la console (F12) pour logs détaillés.</small>
         </div>
-
-        {/* Pied de page médical (inchangé) */}
-        <div className="mt-10 text-center text-gray-500 dark:text-gray-400 text-sm">
-          <div className="flex items-center justify-center">
-            <FaHospital className="mr-2 text-teal-500" />
-            Système Médical Sécurisé • {new Date().getFullYear()}
-          </div>
-        </div>
-
-        {/* Style d'animation (inchangé) */}
-        <style>{`
-          .animate-fade-in-up {
-            animation: fadeInUp 0.7s;
-          }
-          @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(30px);}
-            to { opacity: 1; transform: translateY(0);}
-          }
-        `}</style>
+        <button 
+          onClick={refresh} 
+          className="ml-0 mt-2 sm:mt-0 sm:ml-4 px-4 py-2 bg-yellow-500 text-white rounded-lg text-sm hover:bg-yellow-600 transition duration-150 ease-in-out shadow-md"
+        >
+          🔄 Rafraîchir
+        </button>
       </div>
+      
+      {/* Bouton pour basculer le formulaire */}
+      <div className="flex justify-end mb-6">
+        <button
+            onClick={() => {
+                setIsFormVisible(!isFormVisible);
+                setEditingId(null); // S'assurer que le mode édition est désactivé si on le ferme/rouvre manuellement
+                if (isFormVisible) {
+                    setFormData({ categorie: '', montant: '', description: '' }); // Nettoyer si on ferme
+                }
+            }}
+            className={`px-6 py-3 font-bold rounded-lg transition duration-150 ease-in-out shadow-lg hover:shadow-xl ${
+                isFormVisible
+                    ? 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800'
+                    : 'bg-green-600 text-white hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
+            }`}
+        >
+            {isFormVisible ? 'Cacher le Formulaire' : '➕ Nouvelle Transaction'}
+        </button>
+      </div>
+
+      {/* Formulaire - Affiché conditionnellement */}
+      {isFormVisible && (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl mb-8 border border-gray-200 dark:border-gray-700">
+            <h2 className="text-2xl font-semibold mb-4 text-gray-700 dark:text-gray-200">
+                {editingId ? '✍️ Modifier la Transaction' : '➕ Ajouter une Nouvelle Transaction'}
+            </h2>
+            <form onSubmit={handleSubmit}>
+              {/* MODIFICATION ICI : Réduction du grid à md:grid-cols-3 pour le Montant et Type,
+                  et Description reste sur une ligne complète */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                
+                {/* Colonne 1: Type de Transaction */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Type de Transaction</label>
+                  <select
+                    name="categorie"
+                    value={formData.categorie}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-200 transition duration-150"
+                  >
+                    <option value="" disabled>Sélectionnez le type</option>
+                    {/* Ces valeurs correspondent exactement à l'ENUM de la base de données PostgreSQL */}
+                    <option value="revenu">Revenu</option>
+                    <option value="depense">Dépense</option>
+                  </select>
+                </div>
+                
+                {/* Colonne 2: Montant */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Montant (€)</label>
+                  <input
+                    type="number"
+                    name="montant"
+                    value={formData.montant}
+                    onChange={handleInputChange}
+                    step="0.01"
+                    placeholder="Ex: 1000.50 ou -50.00"
+                    required
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-200 transition duration-150"
+                  />
+                </div>
+
+                {/* Colonne 3: Description (ne span plus, mais occupe l'espace restant) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description (Optionnel)</label>
+                  <textarea
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    rows="1" // Ajusté pour être sur une seule ligne
+                    placeholder="Ex: Achat de matériel de bureau ou Salaire mensuel"
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-4 focus:ring-blue-100 dark:focus:ring-blue-900 focus:border-blue-500 dark:bg-gray-700 dark:text-gray-200 transition duration-150 resize-none"
+                  ></textarea>
+                </div>
+              </div>
+              
+              {/* Ligne des boutons */}
+              <div className="flex justify-end pt-2 gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    // Les couleurs des boutons restent dynamiques et bien contrastées
+                    className="px-6 py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition duration-150 ease-in-out shadow-lg hover:shadow-xl min-w-[180px] dark:bg-blue-700 dark:hover:bg-blue-800"
+                  >
+                    {loading ? '...Traitement' : editingId ? 'Sauvegarder' : 'Ajouter'}
+                  </button>
+                  {editingId && (
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      className="px-6 py-3 bg-gray-500 text-white font-bold rounded-lg hover:bg-gray-600 transition duration-150 ease-in-out shadow-md min-w-[100px] dark:bg-gray-600 dark:hover:bg-gray-700"
+                    >
+                      Annuler
+                    </button>
+                  )}
+              </div>
+            </form>
+        </div>
+      )}
+
+      {/* Erreur - Design en alerte compatible dark mode */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-100 dark:bg-red-900 border-l-4 border-red-500 text-red-800 dark:text-red-200 rounded-lg shadow-md">
+          <strong className="font-bold">❌ Erreur de l'Opération :</strong> {error}
+          <br />
+          <small className="text-sm">Veuillez corriger les données ou vérifier la connexion API (F12).</small>
+        </div>
+      )}
+
+      {/* GESTION DU CHARGEMENT/ABSENCE DE DONNÉES */}
+      {loading && transactions.length === 0 ? (
+        <div className="text-center py-12 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800 rounded-xl shadow-md text-xl font-medium">
+          ⏳ Chargement initial des transactions...
+        </div>
+      ) : transactions.length === 0 ? (
+        <div className="text-center py-12 text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl shadow-md border border-dashed border-gray-300 dark:border-gray-600">
+          <p className="text-2xl mb-2">📭 Aucune transaction trouvée.</p>
+          <p>Cliquez sur "Nouvelle Transaction" pour commencer.</p>
+        </div>
+      ) : (
+        <>
+            {/* Carte de Sommaire Financier - AUCUN CHANGEMENT SUR CE GRID */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                {/* Total Revenus */}
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border-l-8 border-green-500 hover:shadow-green-300/50 dark:border-green-600 dark:hover:shadow-green-900/50 transition duration-300 ease-in-out transform hover:scale-[1.02]">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Revenus (Magnitude)</p>
+                    <p className="text-4xl font-extrabold text-green-600 dark:text-green-400 mt-2">
+                        {summary.totalRevenuMagnitude.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">({revenues.length} transactions)</p>
+                </div>
+                
+                {/* Total Dépenses */}
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-2xl border-l-8 border-red-500 hover:shadow-red-300/50 dark:border-red-600 dark:hover:shadow-red-900/50 transition duration-300 ease-in-out transform hover:scale-[1.02]">
+                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Dépenses (Magnitude)</p>
+                    <p className="text-4xl font-extrabold text-red-600 dark:text-red-400 mt-2">
+                        {summary.totalDepenseMagnitude.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">({expenses.length} transactions)</p>
+                </div>
+                
+                {/* Solde Net */}
+                {/* J'ai commenté la troisième carte Solde Net car elle n'était pas entièrement fournie dans l'original, mais la place est là. */}
+            </div>
+
+            {/* Affichage des transactions regroupées par type */}
+            {renderTransactionTable("Revenus", revenues, 'green')}
+            {renderTransactionTable("Dépenses", expenses, 'red')}
+        </>
+      )}
     </div>
   );
 };
 
-export default AdminDashboard;
+export default TransactionManager;
