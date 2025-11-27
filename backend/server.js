@@ -11,7 +11,7 @@ app.use(express.json());
 
 // Connexion à PostgreSQL via Render (utilisez DATABASE_URL en env var)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://test_gfik_user:Bt4dBLWSBUp192ATekkU6GZWGjwJIMq9@dpg-d4k9eqogjchc73a1ioeg-a.oregon-postgres.render.com/test_gfik',
+  connectionString: process.env.DATABASE_URL || 'postgresql://test_vu3k_user:xbXR4Slr5ASPC9OLhdXk3XjqWkkMZRuJ@dpg-d4kb14ruibrs73fcsoq0-a.oregon-postgres.render.com/test_vu3k',
   ssl: { rejectUnauthorized: false } // Nécessaire pour Render
 });
 
@@ -52,27 +52,7 @@ async function createTables() {
       );
     `);
 
-    // Vérification et mise à jour des colonnes si la table existe déjà (pour compatibilité)
-    await pool.query(`
-      DO $$ 
-      BEGIN
-        -- Mettre à jour la colonne categorie si nécessaire
-        IF NOT (EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name = 'transaction' AND column_name = 'categorie' AND udt_name = 'transaction_categorie'
-        )) THEN
-          ALTER TABLE transaction ALTER COLUMN categorie TYPE transaction_categorie USING categorie::transaction_categorie;
-        END IF;
-
-        -- Ajouter la colonne description si elle n'existe pas
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name = 'transaction' AND column_name = 'description'
-        ) THEN
-          ALTER TABLE transaction ADD COLUMN description TEXT;
-        END IF;
-      END $$;
-    `);
+   
 
     // Table activites
     await pool.query(`
