@@ -11,7 +11,7 @@ app.use(express.json());
 
 // Connexion à PostgreSQL via Render (utilisez DATABASE_URL en env var)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://test_vu3k_user:xbXR4Slr5ASPC9OLhdXk3XjqWkkMZRuJ@dpg-d4kb14ruibrs73fcsoq0-a.oregon-postgres.render.com/test_vu3k',
+  connectionString: process.env.DATABASE_URL || 'postgresql://test_wn7g_user:3ELJ6oKB5jOgG2BSiel0GzMR5CYQRDlU@dpg-d4kgcei4d50c73dg60vg-a.oregon-postgres.render.com/test_wn7g',
   ssl: { rejectUnauthorized: false } // Nécessaire pour Render
 });
 
@@ -27,10 +27,7 @@ pool.connect((err) => {
 async function createTables() {
   try {
     // ⚠️ Suppression temporaire pour la phase de développement
-    await pool.query(`DROP TABLE IF EXISTS transaction CASCADE;`);
-    await pool.query(`DROP TYPE IF EXISTS transaction_categorie;`);
-    // ⚠️ Fin Suppression temporaire
-    
+   
     // Création du type ENUM pour la catégorie de transaction (si inexistant)
     await pool.query(`
       DO $$ 
